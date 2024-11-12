@@ -5,19 +5,34 @@ const axios = require('axios');
 const qrcode = require('qrcode');
 const app = express();
 
+// Cargar variables de entorno desde .env
+require('dotenv').config();
+
 app.use(express.json());
+
+// Leer los orígenes permitidos desde la variable de entorno
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
+  : [];
 
 // Configurar CORS
 app.use(cors({
-  origin: 'https://tu-dominio-frontend.com', // Reemplaza con el dominio de tu frontend
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true); // Permitir solicitudes sin origen
+    if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('No permitido por CORS'));
+    }
+  },
   methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Usar LocalAuth para manejar la sesión automáticamente
+// Configuración del cliente de WhatsApp
 const client = new Client({
   authStrategy: new LocalAuth({
-    dataPath: './wwebjs_auth' // Cambia esto si usas un directorio diferente
+    dataPath: './wwebjs_auth' // O la ruta que uses en render.com
   })
 });
 
