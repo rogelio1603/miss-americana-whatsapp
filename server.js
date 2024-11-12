@@ -1,10 +1,18 @@
 const express = require('express');
+const cors = require('cors');
 const { Client, MessageMedia, LocalAuth } = require('whatsapp-web.js');
 const axios = require('axios');
 const qrcode = require('qrcode');
 const app = express();
 
 app.use(express.json());
+
+// Configurar CORS
+app.use(cors({
+  origin: 'https://tu-dominio-frontend.com', // Reemplaza con el dominio de tu frontend
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
 // Usar LocalAuth para manejar la sesión automáticamente
 const client = new Client({
