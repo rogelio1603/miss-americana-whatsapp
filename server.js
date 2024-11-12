@@ -1,55 +1,69 @@
+// server.js
+
 const express = require('express');
 const cors = require('cors');
 const { Client, MessageMedia, LocalAuth } = require('whatsapp-web.js');
 const axios = require('axios');
 const qrcode = require('qrcode');
-const app = express();
-
-// Cargar variables de entorno desde .env
+const fs = require('fs');
 require('dotenv').config();
 
+const app = express();
 app.use(express.json());
 
-// Leer los orígenes permitidos desde la variable de entorno
+// Configuración de CORS
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
   : [];
 
-// Configurar CORS
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin) return callback(null, true); // Permitir solicitudes sin origen
-    if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+    // Permitir solicitudes sin origen (por ejemplo, Postman)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       callback(new Error('No permitido por CORS'));
     }
   },
   methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type']
 }));
 
-// Configuración del cliente de WhatsApp
+// Asegurar que el directorio de autenticación existe
+const authPath = process.env.AUTH_PATH || './wwebjs_auth';
+if (!fs.existsSync(authPath)){
+    fs.mkdirSync(authPath, { recursive: true });
+}
+
+// Inicializar el cliente de WhatsApp
 const client = new Client({
   authStrategy: new LocalAuth({
-    dataPath: './wwebjs_auth' // O la ruta que uses en render.com
-  })
+    dataPath: authPath
+  }),
+  puppeteer: {
+    headless: true,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-extensions',
+      '--disable-gpu',
+      '--window-size=1920,1080'
+    ],
+  }
 });
 
+// Manejo de eventos del cliente
 client.on('qr', (qr) => {
-  // Generar una imagen del código QR y exponerla a través de una ruta
   qrcode.toDataURL(qr, (err, url) => {
-    // Guardar la URL del QR para accederla desde el frontend o un endpoint
-    // Puedes almacenarla en una variable global o en una base de datos
-    // Por simplicidad, la almacenaremos en una variable
+    if (err) {
+      console.error('Error al generar el QR:', err);
+      return;
+    }
     global.qrCode = url;
-    console.log('QR Code generado, accede a /qr para verlo');
   });
-});
-
-client.on('ready', () => {
-  console.log('Cliente de WhatsApp listo!');
-  global.qrCode = null; // Limpiar el código QR una vez conectado
+  console.log('QR Code recibido, accede a /qr para verlo');
 });
 
 client.on('authenticated', () => {
@@ -60,14 +74,20 @@ client.on('auth_failure', (message) => {
   console.error('Error de autenticación:', message);
 });
 
-client.on('disconnected', (reason) => {
-  console.log('Cliente desconectado:', reason);
-  client.initialize(); // Intentar reconectar
+client.on('ready', () => {
+  console.log('Cliente de WhatsApp listo!');
+  global.qrCode = null; // Limpiar el QR una vez autenticado
+});
+
+client.on('message', msg => {
+  if (msg.body.toLowerCase() === '!ping') {
+    msg.reply('pong');
+  }
 });
 
 client.initialize();
 
-// Ruta para obtener el código QR
+// Ruta para obtener el QR
 app.get('/qr', (req, res) => {
   if (global.qrCode) {
     res.send(`<img src="${global.qrCode}" alt="QR Code">`);
@@ -96,6 +116,7 @@ const formatWhatsAppMessage = (row) => {
   );
 };
 
+// Ruta para enviar mensajes
 app.post('/send-message', async (req, res) => {
   const { phoneNumber, rows } = req.body;
 
@@ -106,7 +127,6 @@ app.post('/send-message', async (req, res) => {
   try {
     for (const row of rows) {
       const textMessage = formatWhatsAppMessage(row);
-
       await client.sendMessage(`${phoneNumber}@c.us`, textMessage);
 
       if (row.imagen_url) {
@@ -121,6 +141,12 @@ app.post('/send-message', async (req, res) => {
     console.error('Error al enviar los mensajes:', error);
     res.status(500).json({ success: false, error: error.message });
   }
+});
+
+// Ruta para verificar el estado del cliente
+app.get('/status', (req, res) => {
+  const status = client.info ? 'Conectado' : 'Desconectado';
+  res.status(200).json({ status });
 });
 
 // Iniciar el servidor
